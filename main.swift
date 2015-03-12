@@ -44,7 +44,7 @@ extension NSFileHandle {
 let stdin = NSFileHandle.fileHandleWithStandardInput()
 
 final class Box<T> {
-	var unbox: T // XXX has to be var to mutate underlying Expr
+	let unbox: T
 	init(_ value: T) { self.unbox = value }
 }
 
@@ -52,27 +52,28 @@ final class Box<T> {
 
 // @derive(Equatable, Hashable)
 enum Expr {
-	case App(Name, Box<Expr>, Box<Expr>)
-	case Var(Name)
+	case App(Hash, Name, Box<Expr>, Box<Expr>)
+	case Var(Hash, Name)
 	case Sub(Repl)
 }
 
 typealias Name = String
 typealias Repl = Int
+typealias Hash = Int
 
 extension Expr: Equatable {}
 func == (lhs: Expr, rhs: Expr) -> Bool {
 	switch lhs {
-	case let .App(n1, l1, r1):
+	case let .App(_, n1, l1, r1):
 		switch rhs {
-		case let .App(n2, l2, r2):
+		case let .App(_, n2, l2, r2):
 			return n1 == n2 && l1.unbox == l2.unbox && r1.unbox == r2.unbox
 		default:
 			return false
 		}
-		case let .Var(n1):
+		case let .Var(_, n1):
 			switch rhs {
-			case let .Var(n2):
+			case let .Var(_, n2):
 				return n1 == n2
 			default:
 				return false
@@ -90,12 +91,12 @@ func == (lhs: Expr, rhs: Expr) -> Bool {
 extension Expr: Hashable {
 	var hashValue: Int {
 		switch self {
-		case let .App(n, l, r):
-			return n.hashValue &+ l.unbox.hashValue &+ r.unbox.hashValue // FIXME: not good hashing
-		case let .Var(n):
-			return n.hashValue
+		case let .App(h, _, _, _):
+			return h
+		case let .Var(h, _):
+			return h
 		case let .Sub(i):
-			return i.hashValue
+			return i
 		}
 	}
 }
@@ -103,10 +104,10 @@ extension Expr: Hashable {
 extension Expr: Printable {
 	var description: String {
 		switch self {
-		case let .App(n, l, r):
-			return n + "(" + l.unbox.description + "," + r.unbox.description + ")"
-		case let .Var(n):
-			return n
+		case let .App(_, n, l, r):
+			return "\(n)(\(l.unbox.description),\(r.unbox.description))"
+		case let .Var(_, n):
+			return n//.description
 		case let .Sub(i):
 			return i.description
 		}
@@ -149,7 +150,8 @@ struct Parser {
 	}
 
 	func parseVar(name: Name) -> Expr {
-		return .Var(name)
+		let hash = name.hashValue
+		return .Var(hash, name)
 	}
 
 	mutating func parseApp(name: Name) -> Expr {
@@ -158,7 +160,8 @@ struct Parser {
 		next()
 		let right = parseExpr()
 		next()
-		return .App(name, Box(left), Box(right))
+		let hash = name.hashValue &+ left.hashValue &+ right.hashValue
+		return .App(hash, name, Box(left), Box(right))
 	}
 
 	mutating func parseExpr() -> Expr {
@@ -193,10 +196,10 @@ extension Expr {
 			state.map[self] = state.num
 			state.num++
 			switch self {
-			case let .App(n, l, r):
+			case let .App(h, n, l, r):
 				let l_ = l.unbox.cse(&state)
 				let r_ = r.unbox.cse(&state)
-				return .App(n, Box(l_), Box(r_))
+				return .App(h, n, Box(l_), Box(r_))
 			case let .Var(n):
 				return .Var(n)
 			case let .Sub(i):
@@ -210,12 +213,13 @@ extension Expr {
 // MARK: Main
 
 var lines = stdin.readLines().generate()
-let lineCount = lines.next()!.toInt()!
+lines.next() // lineCount
+
 for line in lines {
 	var parser = Parser(line)
-	var expr = parser.parse()
+	let expr = parser.parse()
 	var state = State(map: [:], num: 1)
-	expr = expr.cse(&state)
-	println(expr)
+	let result = expr.cse(&state)
+	println(result)
 }
 
