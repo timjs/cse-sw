@@ -2,14 +2,18 @@ import Foundation
 
 // MARK: Extensions
 
+func decurry<A,B>(f: A -> () -> B) -> A -> B {
+    return { a in f(a)() }
+}
+
 extension Character {
     
 	static let letters: ClosedInterval<Character> = "A"..."z"
 
-    static func isLetter(char: Character) -> Bool {
-        return letters.contains(char)
-    }
-    
+	func isLetter() -> Bool {
+		return Character.letters.contains(self)
+	}
+
 }
 
 extension String {
@@ -48,6 +52,35 @@ final class Box<T> {
 	init(_ value: T) { self.unbox = value }
 }
 
+struct PeekableGenerator<S: SequenceType> : GeneratorType {
+	var _generator: S.Generator
+	var _peeked: S.Generator.Element?
+
+	init<T: SequenceType where T.Generator == S.Generator>(_ sequence: T) {
+		_generator = sequence.generate()
+		_peeked = nil
+	}
+
+	mutating func next() -> S.Generator.Element? {
+		if let current = _peeked {
+			_peeked = nil
+			return current
+		} else {
+			return _generator.next()
+		}
+	}
+
+	mutating func peek() -> S.Generator.Element? {
+		if let current = _peeked {
+			return current
+		} else {
+			_peeked = _generator.next()
+			return _peeked
+		}
+	}
+
+}
+
 // MARK: Expressions
 
 // @derive(Equatable, Hashable)
@@ -60,6 +93,34 @@ enum Expr {
 typealias Name = String
 typealias Repl = Int
 typealias Hash = Int
+
+extension Expr: Printable {
+	var description: String {
+		switch self {
+		case let .App(_, n, l, r):
+			return "\(n)(\(l.unbox.description),\(r.unbox.description))"
+		case let .Var(_, n):
+			return n//.description
+		case let .Sub(i):
+			return i.description
+		}
+	}
+}
+
+extension Expr: Hashable {
+	var hashValue: Int {
+		switch self {
+		case let .App(h, _, _, _):
+			return h
+		case let .Var(h, _):
+			return h
+		case let .Sub(i):
+			return i
+		}
+	}
+}
+
+// MARK: Boilerplate
 
 extension Expr: Equatable {}
 func == (lhs: Expr, rhs: Expr) -> Bool {
@@ -88,56 +149,21 @@ func == (lhs: Expr, rhs: Expr) -> Bool {
 	}
 }
 
-extension Expr: Hashable {
-	var hashValue: Int {
-		switch self {
-		case let .App(h, _, _, _):
-			return h
-		case let .Var(h, _):
-			return h
-		case let .Sub(i):
-			return i
-		}
-	}
-}
-
-extension Expr: Printable {
-	var description: String {
-		switch self {
-		case let .App(_, n, l, r):
-			return "\(n)(\(l.unbox.description),\(r.unbox.description))"
-		case let .Var(_, n):
-			return n//.description
-		case let .Sub(i):
-			return i.description
-		}
-	}
-}
-
 // MARK: Parser
 
 struct Parser {
-	var generator: IndexingGenerator<String>
+	var input: PeekableGenerator<String>
 
 	init(_ string: String) {
-		self.generator = string.generate()
+		self.input = PeekableGenerator(string)
 	}
 
-	private func peek() -> Character? {
-		var copy = generator
-		return copy.next()
-	}
-
-	private mutating func next() -> Character? {
-		return generator.next()
-	}
-
-	mutating func nextWhile(predicate: Character -> Bool) -> String {
+	mutating func parseWhile(predicate: Character -> Bool) -> String {
 		var result = ""
-		while let char = peek() {
+		while let char = input.peek() {
 			if predicate(char) {
 				result.append(char)
-				next()
+				input.next()
 			} else {
 				break
 			}
@@ -145,8 +171,12 @@ struct Parser {
 		return result
 	}
 
+}
+
+extension Parser {
+
 	mutating func parseName() -> Name {
-		return nextWhile(Character.isLetter)
+		return parseWhile(decurry(Character.isLetter))
 	}
 
 	func parseVar(name: Name) -> Expr {
@@ -155,18 +185,18 @@ struct Parser {
 	}
 
 	mutating func parseApp(name: Name) -> Expr {
-		next()
+		input.next()
 		let left = parseExpr()
-		next()
+		input.next()
 		let right = parseExpr()
-		next()
+		input.next()
 		let hash = name.hashValue &+ left.hashValue &+ right.hashValue
 		return .App(hash, name, Box(left), Box(right))
 	}
 
 	mutating func parseExpr() -> Expr {
 		let name = parseName()
-		switch peek() {
+		switch input.peek() {
 		case .Some("("):
 			return parseApp(name)
 		default:
@@ -185,6 +215,12 @@ struct Parser {
 struct State {
 	var map: [Expr:Repl]
 	var num: Repl
+
+	init() {
+		map = [:]
+		num = 1
+	}
+
 }
 
 extension Expr {
@@ -194,7 +230,7 @@ extension Expr {
 			return .Sub(repl)
 		} else {
 			state.map[self] = state.num
-			state.num++
+			state.num += 1
 			switch self {
 			case let .App(h, n, l, r):
 				let l_ = l.unbox.cse(&state)
@@ -218,7 +254,7 @@ lines.next() // lineCount
 for line in lines {
 	var parser = Parser(line)
 	let expr = parser.parse()
-	var state = State(map: [:], num: 1)
+	var state = State()
 	let result = expr.cse(&state)
 	println(result)
 }
