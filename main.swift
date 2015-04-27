@@ -52,30 +52,30 @@ final class Box<T> {
 	init(_ value: T) { self.unbox = value }
 }
 
-struct PeekableGenerator<S: SequenceType> : GeneratorType {
-	var _generator: S.Generator
-	var _peeked: S.Generator.Element?
+struct PeekableGenerator<S: SequenceType>: GeneratorType {
+	var generator: S.Generator
+	var peeked: S.Generator.Element?
 
 	init<T: SequenceType where T.Generator == S.Generator>(_ sequence: T) {
-		_generator = sequence.generate()
-		_peeked = nil
+		generator = sequence.generate()
+		peeked = nil
 	}
 
 	mutating func next() -> S.Generator.Element? {
-		if let current = _peeked {
-			_peeked = nil
+		if let current = peeked {
+			peeked = nil
 			return current
 		} else {
-			return _generator.next()
+			return generator.next()
 		}
 	}
 
 	mutating func peek() -> S.Generator.Element? {
-		if let current = _peeked {
+		if let current = peeked {
 			return current
 		} else {
-			_peeked = _generator.next()
-			return _peeked
+			peeked = generator.next()
+			return peeked
 		}
 	}
 
@@ -83,18 +83,19 @@ struct PeekableGenerator<S: SequenceType> : GeneratorType {
 
 // MARK: Expressions
 
-// @derive(Equatable, Hashable)
+// @derive(Equatable)
 enum Expr {
 	case App(Hash, Name, Box<Expr>, Box<Expr>)
 	case Var(Hash, Name)
 	case Sub(Repl)
 }
 
+typealias Hash = Int
 typealias Name = String
 typealias Repl = Int
-typealias Hash = Int
 
 extension Expr: Printable {
+
 	var description: String {
 		switch self {
 		case let .App(_, n, l, r):
@@ -105,9 +106,11 @@ extension Expr: Printable {
 			return i.description
 		}
 	}
+
 }
 
 extension Expr: Hashable {
+
 	var hashValue: Int {
 		switch self {
 		case let .App(h, _, _, _):
@@ -118,6 +121,7 @@ extension Expr: Hashable {
 			return i
 		}
 	}
+
 }
 
 // MARK: Boilerplate
@@ -132,20 +136,20 @@ func == (lhs: Expr, rhs: Expr) -> Bool {
 		default:
 			return false
 		}
-		case let .Var(_, n1):
-			switch rhs {
-			case let .Var(_, n2):
-				return n1 == n2
-			default:
-				return false
-			}
-			case let .Sub(i1):
-				switch rhs {
-				case let .Sub(i2):
-					return i1 == i2
-				default:
-					return false
-				}
+	case let .Var(_, n1):
+		switch rhs {
+		case let .Var(_, n2):
+			return n1 == n2
+		default:
+			return false
+		}
+	case let .Sub(i1):
+		switch rhs {
+		case let .Sub(i2):
+			return i1 == i2
+		default:
+			return false
+		}
 	}
 }
 
@@ -155,7 +159,7 @@ struct Parser {
 	var input: PeekableGenerator<String>
 
 	init(_ string: String) {
-		self.input = PeekableGenerator(string)
+		input = PeekableGenerator(string)
 	}
 
 	mutating func parseWhile(predicate: Character -> Bool) -> String {
